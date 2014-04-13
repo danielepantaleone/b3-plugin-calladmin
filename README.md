@@ -13,10 +13,6 @@ This plugin is capable of spamming admin requests on a Teamspeak 3 server
 * Copy **plugin_calladmin.ini** into **b3/extplugins/conf**
 * Load the plugin in your **b3.xml** configuration file
 
-### Requirements
-
-* Big Brother Bot [version >= 1.10-dev]
-
 ## In-game user guide
 
 * **!calladmin &lt;reason&gt;** - *send an admin request*

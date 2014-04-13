@@ -20,9 +20,12 @@
 #
 # 13/02/2014 - 1.0 - Fenix
 #   - initial version
+# 13/04/2014 - 1.1 - Fenix
+#   - changed default arguments of 'command' method to be None objects
+#   - added backwards compatibility with B3 version < 1.10dev
 
 __author__ = 'Fenix'
-__version__ = '1.0'
+__version__ = '1.1'
 
 import b3
 import b3.plugin
