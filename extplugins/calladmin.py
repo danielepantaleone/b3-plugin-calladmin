@@ -139,13 +139,17 @@ class CalladminPlugin(b3.plugin.Plugin):
                 if func:
                     self._adminPlugin.registerCommand(self, cmd, level, func, alias)
 
-        # register the events needed
-        self.registerEvent(self.console.getEventID('EVT_CLIENT_CONNECT'), self.onConnect)
-        self.registerEvent(self.console.getEventID('EVT_CLIENT_DISCONNECT'), self.onDisconnect)
+        try:
+            # B3 > 1.10dev
+            self.registerEvent(self.console.getEventID('EVT_CLIENT_CONNECT'), self.onConnect)
+            self.registerEvent(self.console.getEventID('EVT_CLIENT_DISCONNECT'), self.onDisconnect)
+        except TypeError:
+            # B3 < 1.10dev
+            self.registerEvent(self.console.getEventID('EVT_CLIENT_CONNECT'))
+            self.registerEvent(self.console.getEventID('EVT_CLIENT_DISCONNECT'))
 
         try:
-            # establish a connection with the
-            # teamspeak server query interface
+            # establish a connection with the teamspeak server query interface
             self._tsconnection = ServerQuery(self._settings['ip'], self._settings['port'])
             self.teamspeak_connect()
         except TS3Error, e:
@@ -161,6 +165,15 @@ class CalladminPlugin(b3.plugin.Plugin):
     ##   EVENTS                                                                                                       ##
     ##                                                                                                                ##
     ####################################################################################################################
+
+    def onEvent(self, event):
+        """\
+        Dispatch events
+        """
+        if event.type == self.console.getEventID('EVT_CLIENT_CONNECT'):
+            self.onConnect(event)
+        elif event.type == self.console.getEventID('EVT_CLIENT_DISCONNECT'):
+            self.onDisconnect(event)
 
     def onConnect(self, event):
         """\
