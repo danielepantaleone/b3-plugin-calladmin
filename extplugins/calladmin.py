@@ -425,10 +425,16 @@ class ServerQuery():
             string = string.replace('|', '\\p')
         return string
 
-    def command(self, cmd, parameter={}, option=[]):
+    def command(self, cmd, parameter=None, option=None):
         """\
         Send a command with parameters and options to the TS3 Query
         """
+        if parameter is None:
+            parameter = {}
+
+        if option is None:
+            option = []
+
         telnet_cmd = cmd
         for key in parameter:
             telnet_cmd += " %s=%s" % (key, self.string2escaping(parameter[key]))
