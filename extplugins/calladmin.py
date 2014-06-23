@@ -9,58 +9,68 @@
 #
 # This program is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 #
-# CHANGELOG:
+# CHANGELOG
 #
-# 13/02/2014 - 1.0 - Fenix
+#   13/02/2014 - 1.0 - Fenix
 #   - initial version
-# 13/04/2014 - 1.1 - Fenix
+#   13/04/2014 - 1.1 - Fenix
 #   - changed default arguments of 'command' method to be None objects
 #   - added backwards compatibility with B3 version < 1.10dev
+#   23/06/2014 - 1.2 - Fenix
+#   - rewritten plugin from scratch
 
 __author__ = 'Fenix'
-__version__ = '1.1'
+__version__ = '1.2'
 
 import b3
 import b3.plugin
 import b3.events
 import telnetlib
-import re
 import thread
+import time
+import re
 
 from ConfigParser import NoOptionError
 
-
-class AdminRequest:
-    """\
-    Represent the admin request
-    """
-    client = None
-    reason = None
-    time = None
-
-    def __init__(self, client, reason, time):
-        """\
-        Object constructor
-        """
-        client = client
-        reason = reason
-        time = int(time)
-
+try:
+    # import the getCmd function
+    import b3.functions.getCmd as getCmd
+except ImportError:
+    # keep backward compatibility
+    def getCmd(instance, cmd):
+        cmd = 'cmd_%s' % cmd
+        if hasattr(instance, cmd):
+            func = getattr(instance, cmd)
+            return func
+        return None
 
 class CalladminPlugin(b3.plugin.Plugin):
 
-    _adminPlugin = None
-    _adminRequest = None
+    adminPlugin = None
+    adminRequest = None
 
-    _tsconnection = None
-    _settings = dict(ip='127.0.0.1', port=10011, serverid=1, username='', password='', hostname='')
+    patterns = {
+        'p1': '[B][ADMIN REQUEST][/B] [B]%s [%s][/B] connected to [B]%s[/B]',
+        'p2': '[B][ADMIN REQUEST][/B] [B]%s[/B] disconnected from [B]%s[/B]',
+        'p3': '[B][ADMIN REQUEST][/B] [B]%s[/B] requested an admin on [B]%s[/B] : [B]%s[/B]',
+    }
+
+    settings = {
+        'ip': '127.0.0.1',
+        'port': 10011,
+        'serverid': 1,
+        'username': '',
+        'password': '',
+        'hostname': '',
+        'treshold': 3600,
+    }
 
     ####################################################################################################################
     ##                                                                                                                ##
@@ -68,67 +78,79 @@ class CalladminPlugin(b3.plugin.Plugin):
     ##                                                                                                                ##
     ####################################################################################################################
 
-    def onLoadConfig(self):
-        """\
-        Load plugin configuration
+    def __init__(self, console, config=None):
         """
-        try:
-            self._settings['ip'] = self.config.get('teamspeak', 'ip')
-            self.debug('loaded teamspeak/ip: %s' % self._settings['ip'])
-        except NoOptionError:
-            self.warning('could not find teamspeak/ip in config file, using default: %s' % self._settings['ip'])
-
-        try:
-            self._settings['port'] = self.config.getint('teamspeak', 'port')
-            self.debug('loaded teamspeak/port: %s' % self._settings['port'])
-        except NoOptionError:
-            self.warning('could not find teamspeak/port in config file, using default: %s' % self._settings['port'])
-        except ValueError, e:
-            self.error('could not load teamspeak/port config value: %s' % e)
-            self.debug('using default value (%s) for teamspeak/port' % self._settings['port'])
-
-        try:
-            self._settings['serverid'] = self.config.getint('teamspeak', 'serverid')
-            self.debug('loaded teamspeak/serverid: %s' % self._settings['serverid'])
-        except NoOptionError:
-            self.warning('could not find teamspeak/serverid in config file, '
-                         'using default: %s' % self._settings['serverid'])
-        except ValueError, e:
-            self.error('could not load teamspeak/serverid config value: %s' % e)
-            self.debug('using default value (%s) for teamspeak/serverid' % self._settings['serverid'])
-
-        try:
-            self._settings['username'] = self.config.get('teamspeak', 'username')
-            self.debug('loaded teamspeak/username: %s' % self._settings['username'])
-        except NoOptionError:
-            self.warning('could not find teamspeak/username in config file')
-
-        try:
-            self._settings['password'] = self.config.get('teamspeak', 'password')
-            self.debug('loaded teamspeak/password: %s' % self._settings['password'])
-        except NoOptionError:
-            self.warning('could not find teamspeak/password in config file')
-
-        # get the server hostname
-        hostname = self.console.getCvar('sv_hostname').getString()
-        self._settings['hostname'] = re.sub('\^[0-9]', '', hostname)
-
-        # check for login credentials being specified in config file
-        if not self._settings['username'] or not self._settings['password']:
-            self.warning('TS3 server query login credentials have not been specified')
-            self.debug('disabling the plugin')
-            self.disable()
-
-    def onStartup(self):
-        """\
-        Initialize plugin settings
+        Build the plugin object
         """
-        # get the admin plugin
-        self._adminPlugin = self.console.getPlugin('admin')
-        if not self._adminPlugin:
+        b3.plugin.Plugin.__init__(self, console, config)
+        self.adminPlugin = self.console.getPlugin('admin')
+        if not self.adminPlugin:
             self.critical('could not start without admin plugin')
             raise SystemExit(220)
 
+    def onLoadConfig(self):
+        """
+        Load plugin configuration
+        """
+        try:
+            self.settings['treshold'] = self.config.getint('teamspeak', 'treshold')
+            self.debug('loaded settings/treshold: %s' % self.settings['treshold'])
+        except NoOptionError:
+            self.warning('could not find settings/treshold in config file, using default: %s' % self.settings['treshold'])
+        except ValueError, e:
+            self.error('could not load settings/treshold config value: %s' % e)
+            self.debug('using default value (%s) for settings/treshold' % self.settings['treshold'])
+
+        try:
+            self.settings['ip'] = self.config.get('teamspeak', 'ip')
+            self.debug('loaded teamspeak/ip: %s' % self.settings['ip'])
+        except NoOptionError:
+            self.warning('could not find teamspeak/ip in config file, using default: %s' % self.settings['ip'])
+
+        try:
+            self.settings['port'] = self.config.getint('teamspeak', 'port')
+            self.debug('loaded teamspeak/port: %s' % self.settings['port'])
+        except NoOptionError:
+            self.warning('could not find teamspeak/port in config file, using default: %s' % self.settings['port'])
+        except ValueError, e:
+            self.error('could not load teamspeak/port config value: %s' % e)
+            self.debug('using default value (%s) for teamspeak/port' % self.settings['port'])
+
+        try:
+            self.settings['serverid'] = self.config.getint('teamspeak', 'serverid')
+            self.debug('loaded teamspeak/serverid: %s' % self.settings['serverid'])
+        except NoOptionError:
+            self.warning('could not find teamspeak/serverid in config file, '
+                         'using default: %s' % self.settings['serverid'])
+        except ValueError, e:
+            self.error('could not load teamspeak/serverid config value: %s' % e)
+            self.debug('using default value (%s) for teamspeak/serverid' % self.settings['serverid'])
+
+        try:
+            self.settings['username'] = self.config.get('teamspeak', 'username')
+            self.debug('loaded teamspeak/username: %s' % self.settings['username'])
+        except NoOptionError:
+            self.error('could not find teamspeak/username in config file: plugin will be disabled')
+
+        try:
+            self.settings['password'] = self.config.get('teamspeak', 'password')
+            self.debug('loaded teamspeak/password: %s' % self.settings['password'])
+        except NoOptionError:
+            self.error('could not find teamspeak/password in config file: plugin will be disabled')
+
+        # get the server hostname
+        hostname = self.console.getCvar('sv_hostname').getString()
+        self.settings['hostname'] = self.console.stripColors(hostname)
+
+        # check for login credentials being specified in config file
+        if not self.settings['username'] or not self.settings['password']:
+            self.warning('invalid plugin configuration: disabling the plugin')
+            self.disable()
+
+    def onStartup(self):
+        """
+        Initialize plugin settings
+        """
         # register our commands
         if 'commands' in self.config.sections():
             for cmd in self.config.options('commands'):
@@ -138,9 +160,9 @@ class CalladminPlugin(b3.plugin.Plugin):
                 if len(sp) == 2:
                     cmd, alias = sp
 
-                func = self.getCmd(cmd)
+                func = getCmd(self, cmd)
                 if func:
-                    self._adminPlugin.registerCommand(self, cmd, level, func, alias)
+                    self.adminPlugin.registerCommand(self, cmd, level, func, alias)
 
         try:
             # B3 > 1.10dev
@@ -150,15 +172,6 @@ class CalladminPlugin(b3.plugin.Plugin):
             # B3 < 1.10dev
             self.registerEvent(self.console.getEventID('EVT_CLIENT_CONNECT'))
             self.registerEvent(self.console.getEventID('EVT_CLIENT_DISCONNECT'))
-
-        try:
-            # establish a connection with the teamspeak server query interface
-            self._tsconnection = ServerQuery(self._settings['ip'], self._settings['port'])
-            self.teamspeak_connect()
-        except TS3Error, e:
-            self.error('could not establish TS3 connection: %s' % e)
-            self.debug('disabling the plugin')
-            self.disable()
 
         # notice plugin startup
         self.debug('plugin started')
@@ -170,7 +183,7 @@ class CalladminPlugin(b3.plugin.Plugin):
     ####################################################################################################################
 
     def onEvent(self, event):
-        """\
+        """
         Dispatch events
         """
         if event.type == self.console.getEventID('EVT_CLIENT_CONNECT'):
@@ -179,34 +192,37 @@ class CalladminPlugin(b3.plugin.Plugin):
             self.onDisconnect(event)
 
     def onConnect(self, event):
-        """\
-        Handle EVT_CLIENT_CONNECT
+        """
+        Executed when EVT_CLIENT_CONNECT is intercepted
         """
         client = event.client
-        if self._adminRequest:
-            if client.maxLevel >= self._adminPlugin._admins_level:
+        if self.adminRequest is not None:
+            if client.maxLevel >= self.adminPlugin._admins_level:
                 # send a message on teamspeak informing that someone connected to handle the request
                 self.debug('admin connected to the server: %s [%s]' % (client.name, client.maxLevel))
-                self.send_teamspeak_message('[B][ADMIN REQUEST][/B] [B]%s [%s][/B] connected to '
-                                            '[B]%s[/B]' % (client.name, client.maxLevel, self._settings['hostname']))
-
-                # inform the client who requested the admin that someone connected
-                self._adminRequest.client.message('^7[^2ADMIN ONLINE^7] %s [^3%s^7]' % (client.name, client.maxLevel))
-
-                # delete the amdin request
-                self._adminRequest = None
+                self.send_teamspeak_message(self.patterns['p1'] % (client.name, client.maxLevel, self.settings['hostname']))
+                self.adminRequest['client'].message('^7[^2ADMIN ONLINE^7] %s [^3%s^7]' % (client.name, client.maxLevel))
+                self.adminRequest = None
 
     def onDisconnect(self, event):
-        """\
-        handle EVT_CLIENT_DISCONNECT
+        """
+        Executed when EVT_CLIENT_DISCONNECT is intercepted
         """
         client = event.client
-        if self._adminRequest:
-            if self._adminRequest.client == client:
+        if self.adminRequest is not None:
+            if self.adminRequest['client'] == client:
                 self.debug('admin request canceled: %s disconnected from the server' % client.name)
-                self.send_teamspeak_message('[B][ADMIN REQUEST][/B] [B]%s[/B] disconnected from '
-                                            '[B]%s[/B]' % (client.name, self._settings['hostname']))
-                self._adminRequest = None
+                self.send_teamspeak_message(self.patterns['p2'] % (client.name, self.settings['hostname']))
+                self.adminRequest = None
+
+    def onEnable(self):
+        """
+        Executed when the plugin is enabled
+        """
+        # check for login credentials being specified in config file
+        if not self.settings['username'] or not self.settings['password']:
+            self.warning('invalid plugin configuration: disabling the plugin')
+            self.disable()
 
     ####################################################################################################################
     ##                                                                                                                ##
@@ -214,68 +230,46 @@ class CalladminPlugin(b3.plugin.Plugin):
     ##                                                                                                                ##
     ####################################################################################################################
 
-    def getCmd(self, cmd):
-        cmd = 'cmd_%s' % cmd
-        if hasattr(self, cmd):
-            func = getattr(self, cmd)
-            return func
-        return None
-
     @staticmethod
     def get_time_string(s):
-        """\
+        """
         Return a time string given it's value in seconds
         """
         if s < 60:
             return '%d second%s' % (s, 's' if s != 1 else '')
-
         if 60 <= s < 3600:
             s = round(s/60)
             return '%d minute%s' % (s, 's' if s != 1 else '')
-
         s = round(s/3600)
         return '%d hour%s' % (s, 's' if s != 1 else '')
 
-    def teamspeak_connect(self):
-        """\
-        Establish a connection with the Teamspeak 3 server
-        """
-        try:
-
-            # disconnect if connected
-            if self._tsconnection is not None:
-                self._tsconnection.disconnect()
-
-            # connect
-            self.info('connecting to TS3 server %s:%s' % (self._settings['ip'], self._settings['port']))
-            self._tsconnection.connect()
-            self.info('connected')
-
-            # login
-            self.info('logging to teamspeak 3 server with login name: %s' % self._settings['username'])
-            self._tsconnection.command('login', dict(client_login_name=self._settings['username'],
-                                                     client_login_password=self._settings['password']))
-
-            # select virtual server
-            self.info('selecting virtual server id: %s' % self._settings['serverid'])
-            self._tsconnection.command('use', {'sid': self._settings['serverid']})
-
-        except TS3Error, e:
-            if e.code == 3329:
-                self.warning("b3 is banned from the Teamspeak 3 server: make sure you add the b3 "
-                             "ip to your Teamspeak 3 server white list (query_ip_whitelist.txt)")
-            raise
-
     def send_teamspeak_message(self, message):
-        """\
+        """
         Send the admin request on the Teamspeak 3 server
         """
         try:
-            self.debug('sending a message on the teamspeak 3 server query interface: %s' % message)
-            self._tsconnection.command('sendtextmessage', dict(targetmode=3, target=1, msg=message))
+
+            d1 = {'client_login_name': self.settings['username'], 'client_login_password': self.settings['password']}
+            d2 = {'sid': self.settings['serverid']}
+            d3 = {'targetmode': 3, 'target': 1, 'msg': message}
+
+            # print in the log what we are going to send
+            self.debug('broadcasting admin request: %s' % message)
+
+            # establish a connection object with the teamspeak server query
+            sq = ServerQuery(self.settings['ip'], self.settings['port'])
+            sq.connect()
+            sq.command('login', d1)
+            sq.command('use', d2)
+            sq.command('sendtextmessage', d3)
+
             return True
+
         except (TS3Error, telnetlib.socket.error), e:
-            self.error('could not send message on the teamspeak 3 serverquery interface: %s' % e)
+            self.error('could not broadcast message over the teamspeak 3 server query interface: %s' % e)
+            if e.code == 3329:
+                self.warning('B3 is banned from the Teamspeak 3 server: make sure you add the b3 '
+                             'ip to your Teamspeak 3 server white list (query_ip_whitelist.txt)')
             return False
 
     ####################################################################################################################
@@ -285,40 +279,41 @@ class CalladminPlugin(b3.plugin.Plugin):
     ####################################################################################################################
 
     def cmd_calladmin(self, data, client, cmd=None):
-        """\
+        """
         <reason> - send an admin request
         """
         if not data:
-            client.message('^7Missing data, try ^3!^7help calladmin')
+            client.message('^7missing data, try ^3!^7help calladmin')
             return
 
         # checking if there are already admins online
-        admins = self._adminPlugin.getAdmins()
+        admins = self.adminPlugin.getAdmins()
         if len(admins) > 0:
             _list = []
             for a in admins:
                 _list.append('^7%s ^7[^3%s^7]' % (a.name, a.maxLevel))
-            cmd.sayLoudOrPM(client, '^7Admin%s already online: %s' % (', '.join(_list), 's' if len(_list) != 1 else ''))
+            cmd.sayLoudOrPM(client, '^7Admin%s already online: %s' % ('s' if len(_list) != 1 else '', ', '.join(_list)))
             return
 
         # checking if someone already submitted a request
-        if self._adminRequest is not None:
-            when = int(self.console.time()) - self._adminRequest.time
-            cmd.sayLoudOrPM(client, '^7Admin request ^1aborted^7: already sent ^3%s ^7ago' % self.get_time_string(when))
-            return
+        if self.adminRequest is not None:
+            # if the previous admin request was done less than
+            # self.settings['treshold'] seconds ago, block here
+            when = int(time.time()) - self.adminRequest['time']
+            if when < self.settings['treshold']:
+                cmd.sayLoudOrPM(client, '^7Admin request ^1aborted^7: already sent ^3%s ^7ago' % self.get_time_string(when))
+                return
 
         # send the admin request
-        r = re.sub('\^[0-9]', '', data)
-        m = '[B][ADMIN REQUEST][/B] [B]%s[/B] requested an admin on [B]%s[/B] : ' \
-            '[B]%s[/B]' % (client.name, self._settings['hostname'], r)
+        r = self.console.stripColors(data)
+        m = self.patterns['p3'] % (client.name, self.settings['hostname'], r)
 
         if self.send_teamspeak_message(m):
-            self._adminRequest = AdminRequest(client, r, self.console.time())
+            self.adminRequest = { 'client': client, 'reason': r, 'time': int(time.time()) }
             client.message('^7Admin request ^2sent^7: an admin will connect as soon as possible')
-            return
-
-        self._adminRequest = None
-        client.message('^7Admin request ^1failed^7: try again in few minutes')
+        else:
+            self.adminRequest = None
+            client.message('^7Admin request ^1failed^7: try again in few minutes')
 
 ########################################################################################################################
 ##                                                                                                                    ##
@@ -353,7 +348,7 @@ class TS3Error(Exception):
     code = None
     
     def __init__(self, code, msg, msg2=None):
-        """\
+        """
         Object constructor
         """
         self.code = code
@@ -361,7 +356,7 @@ class TS3Error(Exception):
         self.msg2 = msg2
 
     def __str__(self):
-        """\
+        """
         Object string representation
         """
         return "ID %s (%s) %s" % (self.code, self.msg, self.msg2)
@@ -378,7 +373,7 @@ class ServerQuery():
     _lock = thread.allocate_lock()
 
     def __init__(self, ip='127.0.0.1', query=10011):
-        """\
+        """
         Object constructor
         """
         self._ip = ip
@@ -401,7 +396,7 @@ class ServerQuery():
         return True
 
     def disconnect(self):
-        """\
+        """
         Close the link to the Teamspeak 3 query port
         """
         if self._telnet is not None:
@@ -411,7 +406,7 @@ class ServerQuery():
 
     @staticmethod
     def escaping2string(string):
-        """\
+        """
         Convert the escaping string form the TS3 Query to a human string
         """
         string = str(string)
@@ -429,7 +424,7 @@ class ServerQuery():
 
     @staticmethod
     def string2escaping(string):
-        """\
+        """
         Convert a human string to a TS3 Query escaping string
         """
         if type(string) == type(int()):
@@ -442,7 +437,7 @@ class ServerQuery():
         return string
 
     def command(self, cmd, parameter=None, option=None):
-        """\
+        """
         Send a command with parameters and options to the TS3 Query
         """
         if parameter is None:
