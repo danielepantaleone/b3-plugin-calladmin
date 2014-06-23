@@ -1,23 +1,40 @@
-Calladmin Plugin for BigBrotherBot
+Calladmin Plugin for BigBrotherBot [![BigBrotherBot](http://i.imgur.com/7sljo4G.png)][B3]
 ==================================
 
-## Description
+Description
+-----------
 
-This plugin is capable of spamming admin requests on a Teamspeak 3 server
+A [BigBrotherBot][B3] plugin which is capable of spamming admin requests on a Teamspeak 3 server.
 
-## How to install
+Download
+--------
 
-### Installing the plugin
+Latest version available [here](https://github.com/FenixXx/b3-plugin-calladmin/archive/master.zip).
 
-* Copy **calladmin.py** into **b3/extplugins**
-* Copy **plugin_calladmin.ini** into **b3/extplugins/conf**
-* Load the plugin in your **b3.xml** configuration file
+Installation
+------------
 
-## In-game user guide
+* create a Admin Server Query account on your Teamspeak 3 server: [manual](http://media.teamspeak.com/ts3_literature/TeamSpeak%203%20Server%20Query%20Manual.pdf)
+* copy the `calladmin.py` file into `b3/extplugins`
+* copy the `plugin_calladmin.ini` file in `b3/extplugins/conf`
+* add to the `plugins` section of your `b3.xml` config file:
 
-* **!calladmin &lt;reason&gt;** - *send an admin request*
+  ```xml
+  <plugin name="calladmin" config="@b3/extplugins/conf/plugin_calladmin.ini" />
+  ```
 
-## Support
+In-game user guide
+------------------
 
-For support regarding this very plugin you can find me on IRC on **#goreclan** @ **Quakenet**<br>
-For support regarding Big Brother Bot you may ask for help on the official website: http://www.bigbrotherbot.net
+* **!calladmin &lt;reason&gt;** `send an admin request`
+
+Support
+-------
+
+If you have found a bug or have a suggestion for this plugin, please report it on the [B3 forums][Support].
+
+[B3]: http://www.bigbrotherbot.net/ "BigBrotherBot (B3)"
+[Support]: http://forum.bigbrotherbot.net/plugins-by-fenix/calladmin-plugin-6649/ "Support topic on the B3 forums"
+
+[![Build Status](https://travis-ci.org/FenixXx/b3-plugin-calladmin.svg?branch=master)](https://travis-ci.org/FenixXx/b3-plugin-calladmin)
+
