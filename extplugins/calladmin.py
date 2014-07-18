@@ -25,9 +25,12 @@
 #   - added backwards compatibility with B3 version < 1.10dev
 #   23/06/2014 - 1.2 - Fenix
 #   - rewritten plugin from scratch
+#   18/07/2014 - 1.3 - Fenix
+#   - added interface with the IRC BOT plugin
+#   - fixed threshold setting not being loaded
 
 __author__ = 'Fenix'
-__version__ = '1.2'
+__version__ = '1.3'
 
 import b3
 import b3.plugin
@@ -51,15 +54,40 @@ except ImportError:
             return func
         return None
 
+try:
+    # import stuff from the ircbot module if available
+    import b3.extplugins.ircbot.colors.GREEN as GREEN
+    import b3.extplugins.ircbot.colors.MAGENTA as MAGENTA
+    import b3.extplugins.ircbot.colors.ORANGE as ORANGE
+    import b3.extplugins.ircbot.colors.RESET as RESET
+    import b3.extplugins.ircbot.functions.convert_colors as convert_colors
+except ImportError:
+    # since the import failed the ircbot plugin is not loaded and thus
+    # this new define of the convert_colors function will never be executed
+    # even though I declare it as a stub method in order to keep consistency
+    GREEN = "\x0303"
+    MAGENTA = "\x0313"
+    ORANGE = "\x0307"
+    RESET = "\x0F\x02"
+    def convert_colors(message):
+        return message
+
+
 class CalladminPlugin(b3.plugin.Plugin):
 
     adminPlugin = None
     adminRequest = None
+    ircbotPlugin = None
 
     patterns = {
+        ## TEAMSPEAK 3 PATTERNS
         'p1': '[B][ADMIN REQUEST][/B] [B]%s [%s][/B] connected to [B]%s[/B]',
         'p2': '[B][ADMIN REQUEST][/B] [B]%s[/B] disconnected from [B]%s[/B]',
         'p3': '[B][ADMIN REQUEST][/B] [B]%s[/B] requested an admin on [B]%s[/B] : [B]%s[/B]',
+        # IRC CHANNEL PATTERNS
+        'i1': '%s[%sADMIN REQUEST%s] %s%s%s [%s%s%s] connected to %s',
+        'i2': '%s[%sADMIN REQUEST%s] %s%s%s disconnected from %s',
+        'i3': '%s[%sADMIN REQUEST%s] %s%s%s requested an admin on %s : %s%s',
     }
 
     settings = {
@@ -70,6 +98,7 @@ class CalladminPlugin(b3.plugin.Plugin):
         'password': '',
         'hostname': '',
         'treshold': 3600,
+        'useirc': True
     }
 
     ####################################################################################################################
@@ -88,18 +117,30 @@ class CalladminPlugin(b3.plugin.Plugin):
             self.critical('could not start without admin plugin')
             raise SystemExit(220)
 
+        # get the ircbot plugin if available
+        self.ircbotPlugin = self.console.getPlugin('ircbot')
+
     def onLoadConfig(self):
         """
         Load plugin configuration
         """
         try:
-            self.settings['treshold'] = self.config.getint('teamspeak', 'treshold')
+            self.settings['treshold'] = self.config.getint('settings', 'treshold')
             self.debug('loaded settings/treshold: %s' % self.settings['treshold'])
         except NoOptionError:
             self.warning('could not find settings/treshold in config file, using default: %s' % self.settings['treshold'])
         except ValueError, e:
             self.error('could not load settings/treshold config value: %s' % e)
             self.debug('using default value (%s) for settings/treshold' % self.settings['treshold'])
+
+        try:
+            self.settings['useirc'] = self.config.getboolean('settings', 'useirc')
+            self.debug('loaded settings/useirc: %s' % self.settings['useirc'])
+        except NoOptionError:
+            self.warning('could not find settings/useirc in config file, using default: %s' % self.settings['useirc'])
+        except ValueError, e:
+            self.error('could not load settings/useirc config value: %s' % e)
+            self.debug('using default value (%s) for settings/useirc' % self.settings['useirc'])
 
         try:
             self.settings['ip'] = self.config.get('teamspeak', 'ip')
@@ -139,13 +180,7 @@ class CalladminPlugin(b3.plugin.Plugin):
             self.error('could not find teamspeak/password in config file: plugin will be disabled')
 
         # get the server hostname
-        hostname = self.console.getCvar('sv_hostname').getString()
-        self.settings['hostname'] = self.console.stripColors(hostname)
-
-        # check for login credentials being specified in config file
-        if not self.settings['username'] or not self.settings['password']:
-            self.warning('invalid plugin configuration: disabling the plugin')
-            self.disable()
+        self.settings['hostname'] = self.console.getCvar('sv_hostname').getString()
 
     def onStartup(self):
         """
@@ -184,7 +219,7 @@ class CalladminPlugin(b3.plugin.Plugin):
 
     def onEvent(self, event):
         """
-        Dispatch events
+        Dispatch events.
         """
         if event.type == self.console.getEventID('EVT_CLIENT_CONNECT'):
             self.onConnect(event)
@@ -193,36 +228,39 @@ class CalladminPlugin(b3.plugin.Plugin):
 
     def onConnect(self, event):
         """
-        Executed when EVT_CLIENT_CONNECT is intercepted
+        Executed when EVT_CLIENT_CONNECT is intercepted.
         """
         client = event.client
         if self.adminRequest is not None:
             if client.maxLevel >= self.adminPlugin._admins_level:
                 # send a message on teamspeak informing that someone connected to handle the request
                 self.debug('admin connected to the server: %s [%s]' % (client.name, client.maxLevel))
-                self.send_teamspeak_message(self.patterns['p1'] % (client.name, client.maxLevel, self.settings['hostname']))
+                hostname = self.console.stripColors(self.settings['hostname'])
+                message = self.patterns['p1'] % (client.name, client.maxLevel, hostname)
+                self.send_teamspeak_message(message)
+                if self.settings['useirc'] and self.ircbotPlugin:
+                    hostname = convert_colors(self.settings['hostname'])
+                    message = self.patterns['i1'] % (RESET, MAGENTA, RESET, ORANGE, client.name, RESET, GREEN, client.maxLevel, RESET, hostname)
+                    self.send_irc_message(message)
                 self.adminRequest['client'].message('^7[^2ADMIN ONLINE^7] %s [^3%s^7]' % (client.name, client.maxLevel))
                 self.adminRequest = None
 
     def onDisconnect(self, event):
         """
-        Executed when EVT_CLIENT_DISCONNECT is intercepted
+        Executed when EVT_CLIENT_DISCONNECT is intercepted.
         """
         client = event.client
         if self.adminRequest is not None:
             if self.adminRequest['client'] == client:
                 self.debug('admin request canceled: %s disconnected from the server' % client.name)
-                self.send_teamspeak_message(self.patterns['p2'] % (client.name, self.settings['hostname']))
+                hostname = self.console.stripColors(self.settings['hostname'])
+                message = self.patterns['p2'] % (client.name, hostname)
+                self.send_teamspeak_message(message)
+                if self.settings['useirc'] and self.ircbotPlugin:
+                    hostname = convert_colors(self.settings['hostname'])
+                    message = self.patterns['i2'] % (RESET, MAGENTA, RESET, ORANGE, client.name, RESET, hostname)
+                    self.send_irc_message(message)
                 self.adminRequest = None
-
-    def onEnable(self):
-        """
-        Executed when the plugin is enabled
-        """
-        # check for login credentials being specified in config file
-        if not self.settings['username'] or not self.settings['password']:
-            self.warning('invalid plugin configuration: disabling the plugin')
-            self.disable()
 
     ####################################################################################################################
     ##                                                                                                                ##
@@ -245,7 +283,8 @@ class CalladminPlugin(b3.plugin.Plugin):
 
     def send_teamspeak_message(self, message):
         """
-        Send the admin request on the Teamspeak 3 server
+        Send the admin request on the Teamspeak 3 server.
+        :param message: The message to be sent.
         """
         try:
 
@@ -270,6 +309,20 @@ class CalladminPlugin(b3.plugin.Plugin):
             if e.code == 3329:
                 self.warning('B3 is banned from the Teamspeak 3 server: make sure you add the b3 '
                              'ip to your Teamspeak 3 server white list (query_ip_whitelist.txt)')
+            return False
+
+    def send_irc_message(self, message):
+        """
+        Send the admin request on the IRC channel the IRC BOT plugin is connected.
+        :param message: The message to be sent.
+        """
+        try:
+            # loop through all the channels the IRC BOT plugin is in
+            for name, channel in self.ircbotPlugin.ircbot.channels.iteritems():
+                channel.message(message)
+            return True
+        except Exception:
+            self.error('could not broadcast message over the IRC network: %s' % e)
             return False
 
     ####################################################################################################################
@@ -304,14 +357,30 @@ class CalladminPlugin(b3.plugin.Plugin):
                 cmd.sayLoudOrPM(client, '^7Admin request ^1aborted^7: already sent ^3%s ^7ago' % self.get_time_string(when))
                 return
 
-        # send the admin request
-        r = self.console.stripColors(data)
-        m = self.patterns['p3'] % (client.name, self.settings['hostname'], r)
+        sent = {
+            # sent on teamspeak
+            'ts3': False,
+            # sent on irc network
+            'irc': False
+        }
 
-        if self.send_teamspeak_message(m):
-            self.adminRequest = { 'client': client, 'reason': r, 'time': int(time.time()) }
+        # send the admin request
+        reason = self.console.stripColors(data)
+        hostname = self.console.stripColors(self.settings['hostname'])
+        message = self.patterns['p3'] % (client.name, hostname, reason)
+        sent['ts3'] = self.send_teamspeak_message(message)
+        if self.settings['useirc'] and self.ircbotPlugin:
+            # broadcast also on the IRC network
+            hostname = convert_colors(self.settings['hostname'])
+            message = self.patterns['i3'] % (RESET, MAGENTA, RESET, ORANGE, client.name, RESET, hostname, ORANGE, reason)
+            sent['irc'] = self.send_irc_message(message)
+
+        if sent['ts3'] or sent['irc']:
+            # we consider the request as being sent if one of the above methods succeed
+            self.adminRequest = { 'client': client, 'reason': reason, 'time': int(time.time()) }
             client.message('^7Admin request ^2sent^7: an admin will connect as soon as possible')
         else:
+            # both teamspeak and irc message couldn't be sent
             self.adminRequest = None
             client.message('^7Admin request ^1failed^7: try again in few minutes')
 
