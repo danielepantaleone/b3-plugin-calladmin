@@ -38,9 +38,11 @@ class Test_commands(CalladminTestCase):
             serverid: 1
             username: fakeusername
             password: fakepassword
+            msg_groupid: -1
 
             [settings]
             treshold: 3600
+            useirc: no
 
             [commands]
             calladmin: user

@@ -17,12 +17,20 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 
 import time
+from mock import Mock
 from mockito import when
 from textwrap import dedent
 from tests import CalladminTestCase
 from tests import logging_disabled
 from calladmin import CalladminPlugin
+from calladmin import RESET
+from calladmin import MAGENTA
+from calladmin import RESET
+from calladmin import ORANGE
+from calladmin import RESET
+from calladmin import ORANGE
 from b3.config import CfgConfigParser
+
 
 class Test_commands(CalladminTestCase):
 
@@ -36,13 +44,18 @@ class Test_commands(CalladminTestCase):
             serverid: 1
             username: fakeusername
             password: fakepassword
+            msg_groupid: -1
 
             [settings]
             treshold: 3600
+            useirc: yes
 
             [commands]
             calladmin: user
         """))
+
+        self.mockIrcbotPlugin = Mock()
+        when(self.console).getPlugin('ircbot').thenReturn(self.mockIrcbotPlugin)
 
         self.p = CalladminPlugin(self.console, self.conf)
         self.p.onLoadConfig()
@@ -74,6 +87,7 @@ class Test_commands(CalladminTestCase):
         # GIVEN
         self.mike.connects('1')
         when(self.p).send_teamspeak_message(self.p.patterns['p3'] % ('Mike', 'Test Server', 'test reason')).thenReturn(False)
+        when(self.p).send_irc_message(self.p.patterns['i3'] % (RESET, MAGENTA, RESET, ORANGE, 'Mike', RESET, 'Test Server', ORANGE, 'test reason')).thenReturn(False)
         # WHEN
         self.mike.clearMessageHistory()
         self.mike.says("!calladmin test reason")
@@ -85,6 +99,7 @@ class Test_commands(CalladminTestCase):
         # GIVEN
         self.mike.connects('1')
         when(self.p).send_teamspeak_message(self.p.patterns['p3'] % ('Mike', 'Test Server', 'test reason')).thenReturn(True)
+        when(self.p).send_irc_message(self.p.patterns['i3'] % (RESET, MAGENTA, RESET, ORANGE, 'Mike', RESET, 'Test Server', ORANGE, 'test reason')).thenReturn(True)
         # WHEN
         self.mike.clearMessageHistory()
         self.mike.says("!calladmin test reason")
@@ -108,6 +123,7 @@ class Test_commands(CalladminTestCase):
         self.mike.connects('1')
         self.p.adminRequest = { 'client': self.mike, 'reason': 'test reason', 'time': int(time.time()) - 6000 }
         when(self.p).send_teamspeak_message(self.p.patterns['p3'] % ('Mike', 'Test Server', 'test reason')).thenReturn(True)
+        when(self.p).send_irc_message(self.p.patterns['i3'] % (RESET, MAGENTA, RESET, ORANGE, 'Mike', RESET, 'Test Server', ORANGE, 'test reason')).thenReturn(False)
         # WHEN
         self.mike.clearMessageHistory()
         self.mike.says("!calladmin test reason")

@@ -184,19 +184,19 @@ class CalladminPlugin(b3.plugin.Plugin):
             self.settings['msg_groupid'] = self.config.getint('teamspeak', 'msg_groupid')
             if  self.settings['msg_groupid'] == -1:
                 self.send_teamspeak_message = self._send_global_teamspeak_message
-                self.warning('setting teamspeak/msg_groupid is set to default value [-1]: admin request will be'
-                             'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+                self.debug('setting teamspeak/msg_groupid is set to default value [-1]: admin request will be '
+                           'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
             else:
                 self.debug('loaded teamspeak/msg_groupid: %s' % self.settings['msg_groupid'])
                 self.send_teamspeak_message = self._send_personal_teamspeak_message
         except NoOptionError:
             self.send_teamspeak_message = self._send_global_teamspeak_message
-            self.warning('could not find teamspeak/msg_groupid in config file: admin request will be'
-                         'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+            self.debug('could not find teamspeak/msg_groupid in config file: admin request will be '
+                       'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
         except ValueError:
             self.send_teamspeak_message = self._send_global_teamspeak_message
-            self.warning('could not load teamspeak/msg_groupid config value: admin request will be'
-                         'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+            self.debug('could not load teamspeak/msg_groupid config value: admin request will be '
+                       'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
 
         # get the server hostname
         self.settings['hostname'] = self.console.getCvar('sv_hostname').getString()
