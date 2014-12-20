@@ -18,19 +18,16 @@
 #
 # CHANGELOG
 #
-#   13/02/2014 - 1.0 - Fenix
-#   - initial version
-#   13/04/2014 - 1.1 - Fenix
-#   - changed default arguments of 'command' method to be None objects
-#   - added backwards compatibility with B3 version < 1.10dev
-#   23/06/2014 - 1.2 - Fenix
-#   - rewritten plugin from scratch
-#   18/07/2014 - 1.3 - Fenix
-#   - added interface with the IRC BOT plugin
-#   - fixed threshold setting not being loaded
+# 13/02/2014 - 1.0 - Fenix - initial version
+# 13/04/2014 - 1.1 - Fenix - changed default arguments of 'command' method to be None objects
+#                          - added backwards compatibility with B3 version < 1.10dev
+# 23/06/2014 - 1.2 - Fenix - rewritten plugin from scratch
+# 18/07/2014 - 1.3 - Fenix - added interface with the IRC BOT plugin
+#                          - fixed threshold setting not being loaded
+# 20/12/2014 - 1.4 - Fenix - added possibility to send message to specific server groups (Teamspeak 3)
 
 __author__ = 'Fenix'
-__version__ = '1.3'
+__version__ = '1.4'
 
 import b3
 import b3.plugin
@@ -79,6 +76,9 @@ class CalladminPlugin(b3.plugin.Plugin):
     adminRequest = None
     ircbotPlugin = None
 
+    # set according to configuration value
+    send_teamspeak_message = None
+
     patterns = {
         ## TEAMSPEAK 3 PATTERNS
         'p1': '[B][ADMIN REQUEST][/B] [B]%s [%s][/B] connected to [B]%s[/B]',
@@ -97,6 +97,7 @@ class CalladminPlugin(b3.plugin.Plugin):
         'username': '',
         'password': '',
         'hostname': '',
+        'msg_groupid': -1,
         'treshold': 3600,
         'useirc': True
     }
@@ -109,7 +110,7 @@ class CalladminPlugin(b3.plugin.Plugin):
 
     def __init__(self, console, config=None):
         """
-        Build the plugin object
+        Build the plugin object.
         """
         b3.plugin.Plugin.__init__(self, console, config)
         self.adminPlugin = self.console.getPlugin('admin')
@@ -117,12 +118,9 @@ class CalladminPlugin(b3.plugin.Plugin):
             self.critical('could not start without admin plugin')
             raise SystemExit(220)
 
-        # get the ircbot plugin if available
-        self.ircbotPlugin = self.console.getPlugin('ircbot')
-
     def onLoadConfig(self):
         """
-        Load plugin configuration
+        Load plugin configuration.
         """
         try:
             self.settings['treshold'] = self.config.getint('settings', 'treshold')
@@ -179,13 +177,40 @@ class CalladminPlugin(b3.plugin.Plugin):
         except NoOptionError:
             self.error('could not find teamspeak/password in config file: plugin will be disabled')
 
+        # default behaviour: global message
+        self.send_teamspeak_message = self._send_global_teamspeak_message
+
+        try:
+            self.settings['msg_groupid'] = self.config.getint('teamspeak', 'msg_groupid')
+            if  self.settings['msg_groupid'] == -1:
+                self.send_teamspeak_message = self._send_global_teamspeak_message
+                self.warning('setting teamspeak/msg_groupid is set to default value [-1]: admin request will be'
+                             'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+            else:
+                self.debug('loaded teamspeak/msg_groupid: %s' % self.settings['msg_groupid'])
+                self.send_teamspeak_message = self._send_personal_teamspeak_message
+        except NoOptionError:
+            self.send_teamspeak_message = self._send_global_teamspeak_message
+            self.warning('could not find teamspeak/msg_groupid in config file: admin request will be'
+                         'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+        except ValueError:
+            self.send_teamspeak_message = self._send_global_teamspeak_message
+            self.warning('could not load teamspeak/msg_groupid config value: admin request will be'
+                         'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+
         # get the server hostname
         self.settings['hostname'] = self.console.getCvar('sv_hostname').getString()
 
     def onStartup(self):
         """
-        Initialize plugin settings
+        Initialize plugin settings.
         """
+        if self.settings['useirc']:
+            # get the ircbot plugin if available
+            self.ircbotPlugin = self.console.getPlugin('ircbot')
+            if self.ircbotPlugin:
+                self.debug('IRC BOT plugin loaded: admin requests will be broadcasted also on the IRC channel the BOT is in')
+
         # register our commands
         if 'commands' in self.config.sections():
             for cmd in self.config.options('commands'):
@@ -219,7 +244,8 @@ class CalladminPlugin(b3.plugin.Plugin):
 
     def onEvent(self, event):
         """
-        Dispatch events.
+        Deprecated event dispatcher, kept for backward compatibility with B3 < 1.10dev.
+        :param event: The event to be handled.
         """
         if event.type == self.console.getEventID('EVT_CLIENT_CONNECT'):
             self.onConnect(event)
@@ -269,7 +295,7 @@ class CalladminPlugin(b3.plugin.Plugin):
     ####################################################################################################################
 
     @staticmethod
-    def get_time_string(s):
+    def get_timestring(s):
         """
         Return a time string given it's value in seconds
         """
@@ -281,16 +307,13 @@ class CalladminPlugin(b3.plugin.Plugin):
         s = round(s/3600)
         return '%d hour%s' % (s, 's' if s != 1 else '')
 
-    def send_teamspeak_message(self, message):
+
+    def _send_global_teamspeak_message(self, message):
         """
-        Send the admin request on the Teamspeak 3 server.
-        :param message: The message to be sent.
+        Send a global message over the Teamspeak 3 server.
+        :param message: The message to be sent
         """
         try:
-
-            d1 = {'client_login_name': self.settings['username'], 'client_login_password': self.settings['password']}
-            d2 = {'sid': self.settings['serverid']}
-            d3 = {'targetmode': 3, 'target': 1, 'msg': message}
 
             # print in the log what we are going to send
             self.debug('broadcasting admin request: %s' % message)
@@ -298,14 +321,47 @@ class CalladminPlugin(b3.plugin.Plugin):
             # establish a connection object with the teamspeak server query
             sq = ServerQuery(self.settings['ip'], self.settings['port'])
             sq.connect()
-            sq.command('login', d1)
-            sq.command('use', d2)
-            sq.command('sendtextmessage', d3)
+            sq.command('login', {'client_login_name': self.settings['username'], 'client_login_password': self.settings['password']})
+            sq.command('use', {'sid': self.settings['serverid']})
+            sq.command('sendtextmessage', {'targetmode': 3, 'target': 1, 'msg': message})
 
             return True
 
         except (TS3Error, telnetlib.socket.error), e:
             self.error('could not broadcast message over the teamspeak 3 server query interface: %s' % e)
+            if e.code == 3329:
+                self.warning('B3 is banned from the Teamspeak 3 server: make sure you add the b3 '
+                             'ip to your Teamspeak 3 server white list (query_ip_whitelist.txt)')
+            return False
+
+    def _send_personal_teamspeak_message(self, message):
+        """
+        Send a message over the Teamspeak 3 server to all the people belonging
+        to the Teamspeak 3 group matching the 'msg_groupid' configuration value.
+        """
+        try:
+
+            # print in the log what we are going to send
+            self.debug('sending admin request to all the people in group [%s]: %s' % (self.settings['msg_groupid'], message))
+
+            # establish a connection object with the teamspeak server query
+            sq = ServerQuery(self.settings['ip'], self.settings['port'])
+            sq.connect()
+            sq.command('login', {'client_login_name': self.settings['username'], 'client_login_password': self.settings['password']})
+            sq.command('use', {'sid': self.settings['serverid']})
+
+            clientlist = sq.command('clientlist')
+            for clientdict in clientlist:
+                clientinfo = sq.command('clientinfo', {'clid': clientdict['clid']})
+                if 'client_servergroups' in clientinfo:
+                    client_servergroups = [int(x) for x in clientinfo['client_servergroups'].split(',')]
+                    if self.settings['msg_groupid'] in client_servergroups:
+                        sq.command('sendtextmessage', {'targetmode': 1, 'target': clientdict['clid'], 'msg': message})
+
+            return True
+
+        except (TS3Error, telnetlib.socket.error), e:
+            self.error('could send personal message over the teamspeak 3 server query interface: %s' % e)
             if e.code == 3329:
                 self.warning('B3 is banned from the Teamspeak 3 server: make sure you add the b3 '
                              'ip to your Teamspeak 3 server white list (query_ip_whitelist.txt)')
@@ -318,10 +374,10 @@ class CalladminPlugin(b3.plugin.Plugin):
         """
         try:
             # loop through all the channels the IRC BOT plugin is in
-            for name, channel in self.ircbotPlugin.ircbot.channels.iteritems():
-                channel.message(message)
+            for key in self.ircbotPlugin.ircbot.channels:
+                self.ircbotPlugin.ircbot.channels[key].message(message)
             return True
-        except Exception:
+        except Exception, e:
             self.error('could not broadcast message over the IRC network: %s' % e)
             return False
 
@@ -354,15 +410,11 @@ class CalladminPlugin(b3.plugin.Plugin):
             # self.settings['treshold'] seconds ago, block here
             when = int(time.time()) - self.adminRequest['time']
             if when < self.settings['treshold']:
-                cmd.sayLoudOrPM(client, '^7Admin request ^1aborted^7: already sent ^3%s ^7ago' % self.get_time_string(when))
+                cmd.sayLoudOrPM(client, '^7Admin request ^1aborted^7: already sent ^3%s ^7ago' % self.get_timestring(when))
                 return
 
-        sent = {
-            # sent on teamspeak
-            'ts3': False,
-            # sent on irc network
-            'irc': False
-        }
+        # check that we sent at least one admin request
+        sent = { 'ts3': False, 'irc': False }
 
         # send the admin request
         reason = self.console.stripColors(data)
