@@ -16,10 +16,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 
-import time
 from mock import Mock
 from mock import call
-from mockito import when
 from textwrap import dedent
 from tests import CalladminTestCase
 from tests import logging_disabled
@@ -72,6 +70,7 @@ class Test_commands(CalladminTestCase):
         # WHEN
         self.mike.clearMessageHistory()
         self.bill.connects('2')
+        self.bill.auth()
         # THEN
         self.p.send_teamspeak_message.assert_has_calls([call('[B][ADMIN REQUEST][/B] [B]Mike[/B] requested an admin on [B]Test Server[/B] : [B]test reason[/B]')])
         self.p.send_teamspeak_message.assert_has_calls([call('[B][ADMIN REQUEST][/B] [B]Bill [40][/B] connected to [B]Test Server[/B]')])

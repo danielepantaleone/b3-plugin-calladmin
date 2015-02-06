@@ -25,9 +25,11 @@
 # 18/07/2014 - 1.3 - Fenix - added interface with the IRC BOT plugin
 #                          - fixed threshold setting not being loaded
 # 20/12/2014 - 1.4 - Fenix - added possibility to send message to specific server groups (Teamspeak 3)
+# 06/02/2015 - 1.5 - Fenix - new plugin module structure
+#                          - make use of EVT_CLIENT_AUTH in order to retrieve the correct client level
 
 __author__ = 'Fenix'
-__version__ = '1.4'
+__version__ = '1.5'
 
 import b3
 import b3.plugin
@@ -66,8 +68,7 @@ except ImportError:
     MAGENTA = "\x0313"
     ORANGE = "\x0307"
     RESET = "\x0F\x02"
-    def convert_colors(message):
-        return message
+    convert_colors = lambda x: x
 
 
 class CalladminPlugin(b3.plugin.Plugin):
@@ -191,12 +192,12 @@ class CalladminPlugin(b3.plugin.Plugin):
                 self.send_teamspeak_message = self._send_personal_teamspeak_message
         except NoOptionError:
             self.send_teamspeak_message = self._send_global_teamspeak_message
-            self.debug('could not find teamspeak/msg_groupid in config file: admin request will be '
-                       'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+            self.warning('could not find teamspeak/msg_groupid in config file: admin request will be '
+                         'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
         except ValueError:
             self.send_teamspeak_message = self._send_global_teamspeak_message
-            self.debug('could not load teamspeak/msg_groupid config value: admin request will be '
-                       'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
+            self.warning('could not load teamspeak/msg_groupid config value: admin request will be '
+                         'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
 
         # get the server hostname
         self.settings['hostname'] = self.console.getCvar('sv_hostname').getString()
@@ -226,11 +227,11 @@ class CalladminPlugin(b3.plugin.Plugin):
 
         try:
             # B3 > 1.10dev
-            self.registerEvent(self.console.getEventID('EVT_CLIENT_CONNECT'), self.onConnect)
+            self.registerEvent(self.console.getEventID('EVT_CLIENT_AUTH'), self.onAuth)
             self.registerEvent(self.console.getEventID('EVT_CLIENT_DISCONNECT'), self.onDisconnect)
         except TypeError:
             # B3 < 1.10dev
-            self.registerEvent(self.console.getEventID('EVT_CLIENT_CONNECT'))
+            self.registerEvent(self.console.getEventID('EVT_CLIENT_AUTH'))
             self.registerEvent(self.console.getEventID('EVT_CLIENT_DISCONNECT'))
 
         # notice plugin startup
@@ -247,14 +248,14 @@ class CalladminPlugin(b3.plugin.Plugin):
         Deprecated event dispatcher, kept for backward compatibility with B3 < 1.10dev.
         :param event: The event to be handled.
         """
-        if event.type == self.console.getEventID('EVT_CLIENT_CONNECT'):
-            self.onConnect(event)
+        if event.type == self.console.getEventID('EVT_CLIENT_AUTH'):
+            self.onAuth(event)
         elif event.type == self.console.getEventID('EVT_CLIENT_DISCONNECT'):
             self.onDisconnect(event)
 
-    def onConnect(self, event):
+    def onAuth(self, event):
         """
-        Executed when EVT_CLIENT_CONNECT is intercepted.
+        Executed when EVT_CLIENT_AUTH is intercepted.
         """
         client = event.client
         if self.adminRequest is not None:
@@ -267,7 +268,7 @@ class CalladminPlugin(b3.plugin.Plugin):
                 if self.settings['useirc'] and self.ircbotPlugin:
                     hostname = convert_colors(self.settings['hostname'])
                     message = self.patterns['i1'] % (RESET, MAGENTA, RESET, ORANGE, client.name, RESET, GREEN, client.maxLevel, RESET, hostname)
-                    self.send_irc_message(message)
+                    self.send_irc_message(convert_colors(message))
                 self.adminRequest['client'].message('^7[^2ADMIN ONLINE^7] %s [^3%s^7]' % (client.name, client.maxLevel))
                 self.adminRequest = None
 
@@ -425,7 +426,7 @@ class CalladminPlugin(b3.plugin.Plugin):
             # broadcast also on the IRC network
             hostname = convert_colors(self.settings['hostname'])
             message = self.patterns['i3'] % (RESET, MAGENTA, RESET, ORANGE, client.name, RESET, hostname, ORANGE, reason)
-            sent['irc'] = self.send_irc_message(message)
+            sent['irc'] = self.send_irc_message(convert_colors(message))
 
         if sent['ts3'] or sent['irc']:
             # we consider the request as being sent if one of the above methods succeed
