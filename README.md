@@ -15,12 +15,11 @@ Installation
 ------------
 
 * create a Admin Server Query account on your Teamspeak 3 server: [manual](http://media.teamspeak.com/ts3_literature/TeamSpeak%203%20Server%20Query%20Manual.pdf)
-* copy the `calladmin.py` file into `b3/extplugins`
-* copy the `plugin_calladmin.ini` file in `b3/extplugins/conf`
+* copy the `calladmin` folder into `b3/extplugins`
 * add to the `plugins` section of your `b3.xml` config file:
 
   ```xml
-  <plugin name="calladmin" config="@b3/extplugins/conf/plugin_calladmin.ini" />
+  <plugin name="calladmin" config="@b3/extplugins/calladmin/conf/plugin_calladmin.ini" />
   ```
 
 In-game user guide
