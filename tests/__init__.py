@@ -25,8 +25,6 @@ from mockito import when
 from b3.cvar import Cvar
 from b3.config import XmlConfigParser
 from b3.plugins.admin import AdminPlugin
-from b3.update import B3version
-from b3 import __version__ as b3_version
 
 class logging_disabled(object):
     """
@@ -65,14 +63,8 @@ class CalladminTestCase(unittest2.TestCase):
             from b3.fake import FakeConsole
             self.console = FakeConsole(self.parser_conf)
 
-        # load the admin plugin
-        if B3version(b3_version) >= B3version("1.10dev"):
-            admin_plugin_conf_file = '@b3/conf/plugin_admin.ini'
-        else:
-            admin_plugin_conf_file = '@b3/conf/plugin_admin.xml'
-
         with logging_disabled():
-            self.adminPlugin = AdminPlugin(self.console, admin_plugin_conf_file)
+            self.adminPlugin = AdminPlugin(self.console, '@b3/conf/plugin_admin.ini')
             self.adminPlugin._commands = {}
             self.adminPlugin.onStartup()
 
