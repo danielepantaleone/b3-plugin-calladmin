@@ -27,9 +27,10 @@
 # 20/12/2014 - 1.4 - Fenix - added possibility to send message to specific server groups (Teamspeak 3)
 # 06/02/2015 - 1.5 - Fenix - new plugin module structure
 #                          - make use of EVT_CLIENT_AUTH in order to retrieve the correct client level
+# 01/06/2015 - 1.6 - Fenix - added compatibility with Frostbite games
 
 __author__ = 'Fenix'
-__version__ = '1.5'
+__version__ = '1.6'
 
 import b3
 import b3.plugin
@@ -104,9 +105,9 @@ class CalladminPlugin(b3.plugin.Plugin):
     }
 
     ####################################################################################################################
-    ##                                                                                                                ##
-    ##   STARTUP                                                                                                      ##
-    ##                                                                                                                ##
+    #                                                                                                                  #
+    #   STARTUP                                                                                                        #
+    #                                                                                                                  #
     ####################################################################################################################
 
     def __init__(self, console, config=None):
@@ -200,7 +201,7 @@ class CalladminPlugin(b3.plugin.Plugin):
                          'broadcasted to all the people connected to the Teamspeak 3 server (global chat area)')
 
         # get the server hostname
-        self.settings['hostname'] = self.console.getCvar('sv_hostname').getString()
+        self.settings['hostname'] = self.get_hostname()
 
     def onStartup(self):
         """
@@ -238,9 +239,9 @@ class CalladminPlugin(b3.plugin.Plugin):
         self.debug('plugin started')
 
     ####################################################################################################################
-    ##                                                                                                                ##
-    ##   EVENTS                                                                                                       ##
-    ##                                                                                                                ##
+    #                                                                                                                  #
+    #   EVENTS                                                                                                         #
+    #                                                                                                                  #
     ####################################################################################################################
 
     def onEvent(self, event):
@@ -290,9 +291,9 @@ class CalladminPlugin(b3.plugin.Plugin):
                 self.adminRequest = None
 
     ####################################################################################################################
-    ##                                                                                                                ##
-    ##   FUNCTIONS                                                                                                    ##
-    ##                                                                                                                ##
+    #                                                                                                                  #
+    #   OTHER METHODS                                                                                                  #
+    #                                                                                                                  #
     ####################################################################################################################
 
     @staticmethod
@@ -308,6 +309,19 @@ class CalladminPlugin(b3.plugin.Plugin):
         s = round(s/3600)
         return '%d hour%s' % (s, 's' if s != 1 else '')
 
+    def get_hostname(self):
+        """
+        Return the server hostname.
+        """
+        name = 'sv_hostname'
+        if self.console.gameName in ('bfbc2', 'bf3', 'bf4', 'bfh'):
+            name = 'serverName'
+
+        try:
+            return self.console.getCvar(name).getString()
+        except Exception, e:
+            self.warning('could not retrieve server var (%s) : %s' % (name, e))
+            return '%s:%s' % (self.console._rconIp, self.console._rconPort)
 
     def _send_global_teamspeak_message(self, message):
         """
@@ -383,9 +397,9 @@ class CalladminPlugin(b3.plugin.Plugin):
             return False
 
     ####################################################################################################################
-    ##                                                                                                                ##
-    ##   COMMANDS                                                                                                     ##
-    ##                                                                                                                ##
+    #                                                                                                                  #
+    #   COMMANDS                                                                                                       #
+    #                                                                                                                  #
     ####################################################################################################################
 
     def cmd_calladmin(self, data, client, cmd=None):
@@ -438,9 +452,9 @@ class CalladminPlugin(b3.plugin.Plugin):
             client.message('^7Admin request ^1failed^7: try again in few minutes')
 
 ########################################################################################################################
-##                                                                                                                    ##
-##  TEAMSPEAK SERVER QUERY INTERFACE                                                                                  ##
-##                                                                                                                    ##
+#                                                                                                                      #
+#  TEAMSPEAK SERVER QUERY INTERFACE                                                                                    #
+#                                                                                                                      #
 ########################################################################################################################
 
 # Copyright (c) 2009 Christoph Heer (Christoph.Heer@googlemail.com)
@@ -484,7 +498,7 @@ class TS3Error(Exception):
         return "ID %s (%s) %s" % (self.code, self.msg, self.msg2)
 
 
-class ServerQuery():
+class ServerQuery(object):
 
     _ip = None
     _query = None
