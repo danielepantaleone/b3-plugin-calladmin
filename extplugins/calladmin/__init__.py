@@ -28,9 +28,10 @@
 # 06/02/2015 - 1.5 - Fenix - new plugin module structure
 #                          - make use of EVT_CLIENT_AUTH in order to retrieve the correct client level
 # 01/06/2015 - 1.6 - Fenix - added compatibility with Frostbite games
+# 05/05/2016 - 1.7 - Fenix - fix invalid server group split in group message broadcast
 
 __author__ = 'Fenix'
-__version__ = '1.6'
+__version__ = '1.7'
 
 import b3
 import b3.plugin
@@ -369,7 +370,7 @@ class CalladminPlugin(b3.plugin.Plugin):
             for clientdict in clientlist:
                 clientinfo = sq.command('clientinfo', {'clid': clientdict['clid']})
                 if 'client_servergroups' in clientinfo:
-                    client_servergroups = [int(x) for x in clientinfo['client_servergroups'].split(',')]
+                    client_servergroups = [int(x) for x in str(clientinfo['client_servergroups']).split(',')]
                     if self.settings['msg_groupid'] in client_servergroups:
                         sq.command('sendtextmessage', {'targetmode': 1, 'target': clientdict['clid'], 'msg': message})
 
